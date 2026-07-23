@@ -1,19 +1,28 @@
 // Idempotent seed script: run with `npm run db:seed` from web/.
-// Wipes any prior seed data for SEED_CLINIC_NAME, then inserts one clinic,
-// eight patients, one waiting visit each, and one vitals row each, spanning
-// clearly stable through clearly critical. One patient has two vitals
-// fields left NULL to exercise the missing-data path.
+// Creates TWO clinics, each with four distinct patients (one waiting visit
+// and one vitals row per patient, spanning clearly stable through clearly
+// critical), and one operator auth user per clinic so RLS isolation between
+// clinics can be exercised end-to-end (see scripts/rls-check.ts).
+// Wipes any prior seed clinics/users before recreating, so re-running is safe.
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../web/src/types/database";
 
-const SEED_CLINIC_NAME = "Setu Seed Clinic";
-
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const seedPasswordA = process.env.SEED_PASSWORD_A;
+const seedPasswordB = process.env.SEED_PASSWORD_B;
 
 if (!supabaseUrl || !serviceRoleKey) {
   console.error(
     "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment.",
+  );
+  process.exit(1);
+}
+
+if (!seedPasswordA || !seedPasswordB) {
+  console.error(
+    "Missing SEED_PASSWORD_A or SEED_PASSWORD_B in environment. Set both " +
+      "before seeding — this script will not default to a hardcoded password.",
   );
   process.exit(1);
 }
@@ -33,9 +42,16 @@ interface SeedPatient {
   >;
 }
 
+interface SeedClinic {
+  name: string;
+  operatorEmail: string;
+  operatorPassword: string;
+  patients: SeedPatient[];
+}
+
 const now = new Date().toISOString();
 
-const seedPatients: SeedPatient[] = [
+const clinicAPatients: SeedPatient[] = [
   {
     full_name: "Asha Verma",
     age: 29,
@@ -96,6 +112,9 @@ const seedPatients: SeedPatient[] = [
       consciousness: "confusion",
     },
   },
+];
+
+const clinicBPatients: SeedPatient[] = [
   {
     full_name: "Priya Nair",
     age: 34,
@@ -158,7 +177,22 @@ const seedPatients: SeedPatient[] = [
   },
 ];
 
-async function wipePriorSeed(clinicId: string): Promise<void> {
+const seedClinics: SeedClinic[] = [
+  {
+    name: "Setu Seed Clinic A",
+    operatorEmail: "operator-a@setu.test",
+    operatorPassword: seedPasswordA,
+    patients: clinicAPatients,
+  },
+  {
+    name: "Setu Seed Clinic B",
+    operatorEmail: "operator-b@setu.test",
+    operatorPassword: seedPasswordB,
+    patients: clinicBPatients,
+  },
+];
+
+async function wipePriorClinic(clinicId: string): Promise<void> {
   const { data: visits, error: visitsErr } = await supabase
     .from("visits")
     .select("id")
@@ -192,6 +226,12 @@ async function wipePriorSeed(clinicId: string): Promise<void> {
     .eq("clinic_id", clinicId);
   if (patientsErr) throw patientsErr;
 
+  const { error: membersErr } = await supabase
+    .from("clinic_members")
+    .delete()
+    .eq("clinic_id", clinicId);
+  if (membersErr) throw membersErr;
+
   const { error: clinicErr } = await supabase
     .from("clinics")
     .delete()
@@ -199,29 +239,58 @@ async function wipePriorSeed(clinicId: string): Promise<void> {
   if (clinicErr) throw clinicErr;
 }
 
-async function main(): Promise<void> {
+async function deletePriorAuthUser(email: string): Promise<void> {
+  // The admin API has no "get user by email" lookup, so page through all
+  // users and match by email.
+  let page = 1;
+  const perPage = 200;
+  for (;;) {
+    const { data, error } = await supabase.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+    if (error) throw error;
+
+    const match = data.users.find((u) => u.email === email);
+    if (match) {
+      const { error: delErr } = await supabase.auth.admin.deleteUser(
+        match.id,
+      );
+      if (delErr) throw delErr;
+      return;
+    }
+
+    if (data.users.length < perPage) return;
+    page += 1;
+  }
+}
+
+async function seedOneClinic(seedClinic: SeedClinic): Promise<void> {
   const { data: existing, error: findErr } = await supabase
     .from("clinics")
     .select("id")
-    .eq("name", SEED_CLINIC_NAME)
+    .eq("name", seedClinic.name)
     .maybeSingle();
   if (findErr) throw findErr;
 
   if (existing) {
-    console.log(`Removing prior seed data for clinic "${SEED_CLINIC_NAME}"...`);
-    await wipePriorSeed(existing.id);
+    console.log(`Removing prior seed data for clinic "${seedClinic.name}"...`);
+    await wipePriorClinic(existing.id);
   }
+
+  console.log(`Removing prior seed user "${seedClinic.operatorEmail}"...`);
+  await deletePriorAuthUser(seedClinic.operatorEmail);
 
   const { data: clinic, error: clinicErr } = await supabase
     .from("clinics")
-    .insert({ name: SEED_CLINIC_NAME })
+    .insert({ name: seedClinic.name })
     .select("id")
     .single();
   if (clinicErr) throw clinicErr;
 
-  console.log(`Created clinic "${SEED_CLINIC_NAME}".`);
+  console.log(`Created clinic "${seedClinic.name}".`);
 
-  for (const seedPatient of seedPatients) {
+  for (const seedPatient of seedClinic.patients) {
     const { data: patient, error: patientErr } = await supabase
       .from("patients")
       .insert({
@@ -254,10 +323,40 @@ async function main(): Promise<void> {
     });
     if (vitalsErr) throw vitalsErr;
 
-    console.log(`Seeded ${seedPatient.full_name}.`);
+    console.log(`Seeded ${seedPatient.full_name} in "${seedClinic.name}".`);
   }
 
-  console.log(`Done. Seeded ${seedPatients.length} patients.`);
+  const { data: authUser, error: authErr } =
+    await supabase.auth.admin.createUser({
+      email: seedClinic.operatorEmail,
+      password: seedClinic.operatorPassword,
+      email_confirm: true,
+    });
+  if (authErr || !authUser?.user) {
+    throw authErr ?? new Error("createUser returned no user");
+  }
+
+  const { error: memberErr } = await supabase.from("clinic_members").insert({
+    user_id: authUser.user.id,
+    clinic_id: clinic.id,
+    role: "operator",
+  });
+  if (memberErr) throw memberErr;
+
+  console.log(`Created operator user for "${seedClinic.name}".`);
+}
+
+async function main(): Promise<void> {
+  for (const seedClinic of seedClinics) {
+    await seedOneClinic(seedClinic);
+  }
+
+  console.log("\nDone. Seed credentials (test environment only):");
+  for (const seedClinic of seedClinics) {
+    console.log(
+      `  ${seedClinic.name}: ${seedClinic.operatorEmail} / ${seedClinic.operatorPassword}`,
+    );
+  }
 }
 
 main().catch((err) => {

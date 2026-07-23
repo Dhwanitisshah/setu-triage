@@ -15,9 +15,9 @@ README.md         at root
 ## Phases
 
 - [x] Phase 0 — Monorepo scaffolding
-- [ ] Phase 1
-- [ ] Phase 2
-- [ ] Phase 3
+- [x] Phase 1 — Supabase schema, RLS, typed client, seed data
+- [x] Phase 2 — NEWS2 deterministic rules engine
+- [x] Phase 3 — Auth (Supabase SSR) and RLS verification
 - [ ] Phase 4
 - [ ] Phase 5
 - [ ] Phase 6
@@ -25,3 +25,4 @@ README.md         at root
 - [ ] Phase 8
 - [ ] Phase 9
 - [ ] Phase 10
+- [ ] Phase 11

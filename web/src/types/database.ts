@@ -191,6 +191,11 @@ export type Database = {
         Relationships: [];
       };
     };
-    Functions: Record<string, never>;
+    Functions: {
+      views_missing_security_invoker: {
+        Args: Record<string, never>;
+        Returns: string[];
+      };
+    };
   };
 };

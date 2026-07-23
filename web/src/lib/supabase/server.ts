@@ -1,4 +1,11 @@
 import "server-only";
+// Service-role Supabase client. This key BYPASSES Row Level Security
+// entirely — every query sees every clinic's data. Use it only for
+// trusted server-side operations that must cross clinic boundaries
+// (share-link token validation, seed/admin scripts). Never use it to
+// serve a signed-in user's own requests — for that, use
+// web/src/lib/supabase/rsc.ts, which is cookie-bound to the user's
+// session and RLS-active.
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 

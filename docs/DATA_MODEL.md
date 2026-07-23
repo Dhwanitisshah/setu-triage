@@ -89,6 +89,17 @@ signal in itself. This is called out as a comment directly above the
 `ORDER BY` clause in the migration so it isn't accidentally "fixed" into
 sorting untriaged patients first or by a default assumed band.
 
+**`security_invoker`:** views default to running with their *owner's*
+privileges, not the querying user's, which means a view over RLS-protected
+tables silently bypasses RLS unless `security_invoker = on` is set
+explicitly. `v_queue` shipped without this in Phase 3 and let any
+authenticated operator read every clinic's queue, undetected until
+`rls:check` was extended with a structural assertion for it (see
+[`0003_queue_security_invoker.sql`](../supabase/migrations/0003_queue_security_invoker.sql)).
+Every future view must set `security_invoker = on`, or it reintroduces the
+same bypass — `scripts/rls-check.ts` now fails the run if any view in
+`public` is missing it, so this can't regress silently again.
+
 ## Row Level Security
 
 `public.user_clinic_ids()` is a `SECURITY DEFINER` function returning the
