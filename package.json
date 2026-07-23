@@ -1,0 +1,9 @@
+{
+  "name": "setu-triage",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Root package for scripts/ — supabase-js resolution for seed/smoke scripts run via web's npm scripts.",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.8"
+  }
+}
