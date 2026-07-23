@@ -1,5 +1,12 @@
 // Hand-written types mirroring supabase/migrations/0001_init.sql.
 // Keep in sync with the migration by hand — there is no codegen step yet.
+//
+// Row/Insert/Update shapes must be `type` aliases (object type literals),
+// not `interface` declarations: only object type literals get TypeScript's
+// implicit string index signature, which is what makes them structurally
+// assignable to `Record<string, unknown>` — the constraint Supabase's
+// `GenericTable` requires. An `interface` here silently fails that check
+// and collapses every `.from(...)` call's inferred type to `never`.
 
 export type TriageBand = "green" | "yellow" | "red";
 
@@ -18,20 +25,20 @@ export type Consciousness =
 
 export type DecidedBy = "rules" | "model" | "manual";
 
-export interface ClinicRow {
+export type ClinicRow = {
   id: string;
   name: string;
   created_at: string;
-}
+};
 
-export interface ClinicMemberRow {
+export type ClinicMemberRow = {
   user_id: string;
   clinic_id: string;
   role: ClinicRole;
   created_at: string;
-}
+};
 
-export interface PatientRow {
+export type PatientRow = {
   id: string;
   clinic_id: string;
   full_name: string;
@@ -40,9 +47,9 @@ export interface PatientRow {
   consent_given_at: string;
   consent_withdrawn_at: string | null;
   created_at: string;
-}
+};
 
-export interface VisitRow {
+export type VisitRow = {
   id: string;
   clinic_id: string;
   patient_id: string;
@@ -50,9 +57,9 @@ export interface VisitRow {
   chief_complaint: string | null;
   status: VisitStatus;
   created_at: string;
-}
+};
 
-export interface VitalsRow {
+export type VitalsRow = {
   id: string;
   clinic_id: string;
   visit_id: string;
@@ -65,9 +72,9 @@ export interface VitalsRow {
   consciousness: Consciousness | null;
   recorded_at: string;
   created_at: string;
-}
+};
 
-export interface TriageResultRow {
+export type TriageResultRow = {
   id: string;
   clinic_id: string;
   visit_id: string;
@@ -80,9 +87,9 @@ export interface TriageResultRow {
   rationale: string | null;
   requires_manual_review: boolean;
   created_at: string;
-}
+};
 
-export interface ShareLinkRow {
+export type ShareLinkRow = {
   id: string;
   clinic_id: string;
   visit_id: string;
@@ -92,9 +99,9 @@ export interface ShareLinkRow {
   revoked_at: string | null;
   created_by: string | null;
   created_at: string;
-}
+};
 
-export interface AuditLogRow {
+export type AuditLogRow = {
   id: string;
   clinic_id: string | null;
   actor: string;
@@ -103,9 +110,9 @@ export interface AuditLogRow {
   entity_id: string | null;
   payload: Record<string, unknown>;
   created_at: string;
-}
+};
 
-export interface QueueRow {
+export type QueueRow = {
   visit_id: string;
   clinic_id: string;
   full_name: string;
@@ -116,9 +123,9 @@ export interface QueueRow {
   band: TriageBand | null;
   news2_score: number | null;
   requires_manual_review: boolean | null;
-}
+};
 
-export interface Database {
+export type Database = {
   public: {
     Tables: {
       clinics: {
@@ -126,54 +133,64 @@ export interface Database {
         Insert: Partial<Omit<ClinicRow, "id" | "created_at">> &
           Pick<ClinicRow, "name">;
         Update: Partial<ClinicRow>;
+        Relationships: [];
       };
       clinic_members: {
         Row: ClinicMemberRow;
         Insert: Partial<Omit<ClinicMemberRow, "created_at">> &
           Pick<ClinicMemberRow, "user_id" | "clinic_id" | "role">;
         Update: Partial<ClinicMemberRow>;
+        Relationships: [];
       };
       patients: {
         Row: PatientRow;
         Insert: Partial<Omit<PatientRow, "id" | "created_at">> &
           Pick<PatientRow, "clinic_id" | "full_name" | "consent_given_at">;
         Update: Partial<PatientRow>;
+        Relationships: [];
       };
       visits: {
         Row: VisitRow;
         Insert: Partial<Omit<VisitRow, "id" | "created_at">> &
           Pick<VisitRow, "clinic_id" | "patient_id">;
         Update: Partial<VisitRow>;
+        Relationships: [];
       };
       vitals: {
         Row: VitalsRow;
         Insert: Partial<Omit<VitalsRow, "id" | "created_at">> &
           Pick<VitalsRow, "clinic_id" | "visit_id">;
         Update: Partial<VitalsRow>;
+        Relationships: [];
       };
       triage_results: {
         Row: TriageResultRow;
         Insert: Partial<Omit<TriageResultRow, "id" | "created_at">> &
           Pick<TriageResultRow, "clinic_id" | "visit_id" | "band" | "decided_by">;
         Update: Partial<TriageResultRow>;
+        Relationships: [];
       };
       share_links: {
         Row: ShareLinkRow;
         Insert: Partial<Omit<ShareLinkRow, "id" | "created_at">> &
           Pick<ShareLinkRow, "clinic_id" | "visit_id" | "token_hash" | "expires_at">;
         Update: Partial<ShareLinkRow>;
+        Relationships: [];
       };
       audit_log: {
         Row: AuditLogRow;
         Insert: Partial<Omit<AuditLogRow, "id" | "created_at">> &
           Pick<AuditLogRow, "actor" | "action" | "entity">;
         Update: Partial<AuditLogRow>;
+        Relationships: [];
       };
     };
     Views: {
       v_queue: {
         Row: QueueRow;
+        Relationships: [];
       };
     };
+    Functions: Record<string, never>;
   };
-}
+};
