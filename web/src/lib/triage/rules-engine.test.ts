@@ -122,11 +122,11 @@ describe("assess - missing parameters", () => {
 });
 
 describe("assess - paediatric override", () => {
-  it("age < 16 => paediatric caveat, manual review, band forced to red", () => {
+  it("age < 16 => paediatric caveat, manual review, band unbanded (null)", () => {
     const result = assess(normalVitals, withContext({ age: 15 }));
     expect(result.caveats).toContain("paediatric");
     expect(result.requiresManualReview).toBe(true);
-    expect(result.band).toBe("red");
+    expect(result.band).toBeNull();
     expect(result.news2Score).toBe(0); // score still reported, just not used for banding
   });
 
@@ -150,21 +150,22 @@ describe("assess - obstetric override", () => {
     expect(result.requiresManualReview).toBe(false);
   });
 
-  it("pregnancyWeeks 20 => obstetric caveat, manual review, band forced to red", () => {
+  it("pregnancyWeeks 20 => obstetric caveat, manual review, band unbanded (null)", () => {
     const result = assess(normalVitals, withContext({ pregnancyWeeks: 20 }));
     expect(result.caveats).toContain("obstetric");
     expect(result.requiresManualReview).toBe(true);
-    expect(result.band).toBe("red");
+    expect(result.band).toBeNull();
     expect(result.news2Score).toBe(0);
   });
 });
 
 describe("assess - spinal cord injury override", () => {
-  it("hasSpinalCordInjury true => caveat and manual review, band still produced normally", () => {
+  it("hasSpinalCordInjury true => caveat and manual review, band still produced (non-null), unlike paediatric/obstetric", () => {
     const result = assess(normalVitals, withContext({ hasSpinalCordInjury: true }));
     expect(result.caveats).toContain("spinal-cord-injury");
     expect(result.requiresManualReview).toBe(true);
-    expect(result.band).toBe("green"); // band is still produced, unlike paediatric/obstetric
+    expect(result.band).not.toBeNull();
+    expect(result.band).toBe("green");
   });
 
   it("hasSpinalCordInjury false does not trigger the caveat", () => {
@@ -190,5 +191,6 @@ describe("assess - determinism", () => {
     const first = assess(withVital({ pulse: null }), context);
     const second = assess(withVital({ pulse: null }), context);
     expect(first).toEqual(second);
+    expect(first.band).toBeNull();
   });
 });

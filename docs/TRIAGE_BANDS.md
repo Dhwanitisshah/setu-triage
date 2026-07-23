@@ -100,26 +100,65 @@ destroys the automated reasoning it replaces — the full history of what the ru
 engine said, and what a clinician overrode it to, stays inspectable (see
 `docs/DATA_MODEL.md`, `triage_results`).
 
-### 2.3 Patients under 16 are excluded from automated NEWS2 scoring
+### 2.3 Patients under 16, and pregnancy ≥ 20 weeks, are unbanded — not forced red
 
-**Rule:** A visit for a patient recorded with `age < 16` must not be band-assigned
-by the rules engine. It must be flagged for manual assessment instead.
+**Rule:** A visit for a patient recorded with `age < 16`, or with
+`pregnancyWeeks >= 20`, must not be band-assigned by the rules engine. `band` is
+set to `null` and `requires_manual_review = true`. The NEWS2 aggregate score is
+still computed and reported alongside the null band — it is not suppressed, only
+marked as not valid for banding this patient.
+
+An earlier version of this rule forced `band = 'red'` for these visits, on the
+reasoning that erring upward is always the safer direction when a distinction has
+to be lost (see §1). That was wrong: **severity and unscoreability are different
+axes.** Red is supposed to mean "this patient's physiology is critical." A
+paediatric or obstetric visit forced to red doesn't necessarily mean that — it
+means "NEWS2 does not apply here and nobody has looked yet." Collapsing the two:
+
+- **mis-ranks the queue.** A truly critical adult (aggregate ≥ 7) and an
+  unassessed 10-year-old with normal-looking observations would sort identically,
+  when only one of them is known to be in physiological crisis.
+- **dilutes what red means** for every other patient in it. Clinical staff scanning
+  the queue need red to reliably mean "act now, physiology says so" — not
+  sometimes that, and sometimes "our scoring system doesn't apply to this
+  patient."
+
+`null` (unbanded) is a distinct, honest signal: *NEWS2 could not evaluate this
+patient at all*, as opposed to yellow/green/red which all say *NEWS2 evaluated
+this patient and concluded X*. `requires_manual_review = true` still guarantees
+the visit surfaces to a human — see `v_queue`'s ordering below, which places
+unbanded second (behind red, ahead of yellow/green), so it gets prompt attention
+without outranking a patient who is known to be critical.
+
+**Precedent for treating "escalate everything, just in case" as its own cost:**
+this is the same tradeoff the RCP made when it downgraded the single-red-score
+trigger in the 2017 NEWS2 update (see §1) — analysis showed that escalating
+indiscriminately raised workload by ~40% for only ~3% better detection. Forcing
+every paediatric/obstetric visit to red is the same kind of indiscriminate
+escalation, just applied to a population NEWS2 was never validated against in the
+first place, where "escalate" doesn't even carry the meaning of "physiologically
+critical" to justify the cost.
 
 **Relationship to NEWS2: not a deviation — this enforces a boundary NEWS2 already
 states for itself.** `docs/NEWS2_REFERENCE.md`'s "Scope and exclusions" section
-states NEWS2 is validated only for adults 16 and over, and that the RCP is explicit a
-system with altered parameters or population may not be called NEWS. Running the
-unmodified NEWS2 table against a child's physiology and still presenting the result as
-"NEWS2" would misuse the score, not extend it.
+states NEWS2 is validated only for adults 16 and over, and only up to 20 weeks of
+pregnancy (a dedicated obstetric score, e.g. MEOWS, should be used beyond that);
+the RCP is explicit that a system with altered parameters or population may not be
+called NEWS. Running the unmodified NEWS2 table against a child's physiology, or
+against a pregnancy past 20 weeks, and still using its output to assign a Setu
+band would misuse the score, not extend it.
 
-**Reasoning:** children's physiological response to acute illness differs enough from
-adults' that the same thresholds are not validated to mean the same thing. Excluding
-this population from automated scoring, rather than running the numbers anyway and
-labelling the result cautiously, keeps Setu's "unmodified NEWS2" claim honest for
-every score it does show.
+**Reasoning:** children's physiological response to acute illness, and the
+physiological changes of pregnancy past 20 weeks, differ enough from the general
+adult population that the same thresholds are not validated to mean the same
+thing. Excluding these populations from automated *banding* — while still
+computing and showing the NEWS2 number for clinical context — keeps Setu's
+"unmodified NEWS2" claim honest for every score it does show, and keeps `band`
+meaningful for every visit where it isn't null.
 
-*Schema support:* `patients.age` (0–130) is the field this rule reads; the check is
-not yet implemented (see Status note above, and Known gaps below).
+*Schema support:* `patients.age` (0–130) is the field the paediatric check reads.
+The obstetric check reads `pregnancyWeeks` from `AssessmentContext`, which is not
+yet a persisted column on `patients` or `vitals` — see Known gaps below.
 
 ---
 
@@ -129,10 +168,12 @@ These are scope limits NEWS2 itself states, that Setu cannot currently apply bec
 the schema does not capture the data needed to detect the condition. They are listed
 here so they are not silently forgotten once the rules engine is built.
 
-- **Pregnancy ≥ 20 weeks.** `docs/NEWS2_REFERENCE.md` states NEWS may be used only up
-  to 20 weeks of pregnancy; beyond that a dedicated obstetric score (e.g. MEOWS) should
-  be used instead. There is currently no pregnancy or gestational-age field in
-  `patients` or `vitals`, so this exclusion cannot be detected or enforced today.
+- **Pregnancy ≥ 20 weeks — schema support pending.** The rules engine already
+  implements this exclusion (§2.3) against `AssessmentContext.pregnancyWeeks`, but
+  there is currently no pregnancy or gestational-age field in `patients` or
+  `vitals`, so no caller can populate it from persisted data yet. Until that field
+  exists, this rule can only fire if a caller supplies `pregnancyWeeks` from
+  outside the schema.
 - **Spinal cord injury.** NEWS2 says the score should be used "with caution" (may be
   unreliable) in patients with spinal cord injury, especially tetraplegia or
   high-level paraplegia, due to autonomic disruption. This is guidance for the

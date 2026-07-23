@@ -25,7 +25,7 @@ export function assess(input: VitalsInput, context: AssessmentContext): TriageAs
   const hasSingleRedScore = parameterScores.some((p) => !p.missing && p.score === 3);
 
   // docs/TRIAGE_BANDS.md §1 — band mapping.
-  let band: TriageBand;
+  let band: TriageBand | null;
   if (score >= 7) {
     band = "red";
     rulesTriggered.push(`aggregate ${score} >= 7 => red`);
@@ -54,12 +54,15 @@ export function assess(input: VitalsInput, context: AssessmentContext): TriageAs
   const isObstetric = context.pregnancyWeeks !== null && context.pregnancyWeeks >= 20;
 
   // docs/TRIAGE_BANDS.md §2.3 — patients under 16 excluded from automated banding.
+  // Unbanded (null), not forced red: unscoreable and most-severe are different
+  // axes, and collapsing them into red would both mis-rank the queue and dilute
+  // what red means for everyone else in it.
   if (isPaediatric) {
     caveats.push("paediatric");
     requiresManualReview = true;
-    band = "red";
+    band = null;
     rulesTriggered.push(
-      "age < 16: NEWS2 not validated for children, not used for banding, forced to red pending manual review",
+      "age < 16: NEWS2 not validated for children, not used for banding, unbanded pending manual review",
     );
   }
 
@@ -69,9 +72,9 @@ export function assess(input: VitalsInput, context: AssessmentContext): TriageAs
   if (isObstetric) {
     caveats.push("obstetric");
     requiresManualReview = true;
-    band = "red";
+    band = null;
     rulesTriggered.push(
-      "pregnancy >= 20 weeks: NEWS2 not valid past 20 weeks, not used for banding, forced to red pending manual review",
+      "pregnancy >= 20 weeks: NEWS2 not valid past 20 weeks, not used for banding, unbanded pending manual review",
     );
   }
 

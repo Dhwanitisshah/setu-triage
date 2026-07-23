@@ -78,7 +78,7 @@ export type TriageResultRow = {
   id: string;
   clinic_id: string;
   visit_id: string;
-  band: TriageBand;
+  band: TriageBand | null;
   decided_by: DecidedBy;
   news2_score: number | null;
   rules_triggered: unknown[];

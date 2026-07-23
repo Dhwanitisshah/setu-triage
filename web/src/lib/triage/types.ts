@@ -41,7 +41,8 @@ export type TriageBand = "green" | "yellow" | "red";
 export type TriageAssessment = {
   news2Score: number | null;
   isPartialScore: boolean;
-  band: TriageBand;
+  /** null = unbanded: NEWS2 is not valid for this patient, a human must triage them. */
+  band: TriageBand | null;
   parameterScores: ParameterScore[];
   rulesTriggered: string[];
   missingParameters: string[];
