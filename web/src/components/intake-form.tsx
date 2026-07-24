@@ -272,7 +272,10 @@ function IntakeResult({
           )}
         </p>
         <p>
-          NEWS2 score: <span className="font-medium">{assessment.news2Score ?? "n/a"}</span>
+          NEWS2 score:{" "}
+          <span className="font-medium">
+            {assessment.news2Score === null ? "not scored" : assessment.news2Score}
+          </span>
           {assessment.isPartialScore && (
             <span className="ml-2 rounded bg-yellow-200 px-1.5 py-0.5 text-xs font-medium text-yellow-900">
               partial score — missing parameters

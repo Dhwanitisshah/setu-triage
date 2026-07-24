@@ -102,7 +102,7 @@ function scoreNumeric(
 export function scoreNews2(
   input: VitalsInput,
   context: AssessmentContext,
-): { score: number; parameterScores: ParameterScore[]; missing: string[] } {
+): { score: number | null; parameterScores: ParameterScore[]; missing: string[]; allPresent: boolean } {
   const parameterScores: ParameterScore[] = [
     scoreNumeric("respiratoryRate", input.respiratoryRate, RESPIRATION_RATE_BANDS),
     scoreSpo2(input.spo2, input.onSupplementalOxygen, context.useScale2),
@@ -113,8 +113,18 @@ export function scoreNews2(
     scoreNumeric("temperature", input.temperature, TEMPERATURE_BANDS),
   ];
 
-  const score = parameterScores.reduce((sum, p) => (p.missing ? sum : sum + p.score), 0);
   const missing = parameterScores.filter((p) => p.missing).map((p) => p.parameter);
+  const allPresent = missing.length === 0;
 
-  return { score, parameterScores, missing };
+  // Every NEWS2 parameter contributes a non-negative score, so a sum over
+  // only the present ones is a lower bound on the true aggregate -- except
+  // when NOTHING was measured, where there is no lower bound to report at
+  // all, only an absence of information. 0 would misreport that absence as
+  // "measured and normal" (docs/TRIAGE_BANDS.md §2.4).
+  const score =
+    missing.length === parameterScores.length
+      ? null
+      : parameterScores.reduce((sum, p) => (p.missing ? sum : sum + p.score), 0);
+
+  return { score, parameterScores, missing, allPresent };
 }

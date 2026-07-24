@@ -7,9 +7,9 @@ import { scoreNews2 } from "./news2";
 import type { AssessmentContext, TriageAssessment, TriageBand, VitalsInput } from "./types";
 
 export function assess(input: VitalsInput, context: AssessmentContext): TriageAssessment {
-  const { score, parameterScores, missing } = scoreNews2(input, context);
+  const { score, parameterScores, missing, allPresent } = scoreNews2(input, context);
 
-  const isPartialScore = missing.length > 0;
+  const isPartialScore = !allPresent;
   const rulesTriggered: string[] = [];
   const caveats: string[] = [];
   let requiresManualReview = false;
@@ -26,7 +26,13 @@ export function assess(input: VitalsInput, context: AssessmentContext): TriageAs
 
   // docs/TRIAGE_BANDS.md §1 — band mapping.
   let band: TriageBand | null;
-  if (score >= 7) {
+  if (score === null) {
+    // Nothing was measured at all: there is no lower bound to band on.
+    band = null;
+    rulesTriggered.push(
+      "no parameters measured: cannot compute a NEWS2 score, unbanded pending manual review",
+    );
+  } else if (score >= 7) {
     band = "red";
     rulesTriggered.push(`aggregate ${score} >= 7 => red`);
   } else if (score >= 5) {
@@ -38,6 +44,25 @@ export function assess(input: VitalsInput, context: AssessmentContext): TriageAs
   } else {
     band = "green";
     rulesTriggered.push(`aggregate ${score} in 0-4 with no single parameter scoring 3 => green`);
+  }
+
+  // docs/TRIAGE_BANDS.md §2.4 — every NEWS2 parameter
+  // contributes >= 0, so a score computed from a subset of parameters is a
+  // lower bound on the true score: measuring what's missing can only raise
+  // it, never lower it. A partial score that already crosses a red/yellow
+  // threshold is therefore still valid — the true score can only be higher.
+  // A partial score that computes to green is NOT trustworthy: an unmeasured
+  // parameter could still push the true score past a threshold, so green is
+  // reserved for complete data only.
+  if (isPartialScore && band === "green") {
+    band = null;
+    rulesTriggered.push(
+      `missing parameter(s) [${missing.join(", ")}]: partial score ${score} would be green, but a lower band cannot be ruled out with data missing, unbanded pending manual review`,
+    );
+  } else if (isPartialScore && band !== null) {
+    rulesTriggered.push(
+      `band ${band} stands despite missing parameter(s) [${missing.join(", ")}]: a partial NEWS2 score is a lower bound, so a score that already crosses this band's threshold cannot be reduced by measuring the rest`,
+    );
   }
 
   // NEWS2_REFERENCE.md "Scope and exclusions" — use with caution for spinal

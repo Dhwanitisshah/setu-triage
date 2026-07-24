@@ -160,6 +160,53 @@ meaningful for every visit where it isn't null.
 The obstetric check reads `pregnancyWeeks` from `AssessmentContext`, which is not
 yet a persisted column on `patients` or `vitals` — see Known gaps below.
 
+### 2.4 A partial score is a lower bound, not a conclusion — it may band up, never down
+
+**Rule:** Every NEWS2 parameter contributes a score ≥ 0, so an aggregate computed
+from a subset of the seven parameters (§2.1) is a *lower bound* on the true
+aggregate: measuring what's missing can only raise the total, never lower it. The
+rules engine uses this asymmetrically:
+
+- If the partial aggregate already computes to **red** (≥ 7) or **yellow**
+  (5–6, or any single parameter scoring 3) under the ordinary §1 mapping, that
+  band stands. The true aggregate can only be equal or higher, so it cannot
+  fall back below the threshold once crossed.
+- If the partial aggregate computes to **green** (0–4, no single parameter at
+  3), that conclusion is **not** trusted. An unmeasured parameter could still
+  push the true aggregate past a threshold the partial score hasn't reached
+  yet. The visit is banded `null` (unbanded) with `requires_manual_review =
+  true` instead of green.
+- If **no** parameters were measured at all, there is no lower bound to band
+  on: `news2_score` is `null` (not `0` — see §2.1) and `band` is `null`.
+
+In short: missing data can only ever move a band *up* the mapping in §1, never
+down, and `green` requires all seven parameters to be present — there is no
+such thing as a partial green.
+
+**Relationship to NEWS2: Setu-specific deviation — extends NEWS2 into a case
+it does not define.** Like §2.1, NEWS2's charts assume all seven parameters
+are available; it has no rule for what to conclude from a subset. Treating an
+incomplete aggregate as directly comparable to the complete-data thresholds in
+§1 is a Setu decision about how to use an undercount safely, not something
+NEWS2 itself specifies.
+
+**Reasoning:** §2.1 already refuses to score a missing parameter as normal so
+it can't silently look healthy. But that alone under-corrects: because the
+aggregate sums only present parameters, a patient with several severely
+abnormal vitals and a few unmeasured ones can still fall under the same
+missing-parameter flag as a patient who is otherwise fine, and both would sort
+identically by band. Since every parameter can only add to the total, a
+partial score that has *already* reached red or yellow is real evidence — not
+an artifact of missing data — and discarding it (e.g. by unbanding every
+visit with any missing vital, or worse, by leaving a high partial score
+banded green) would throw away a signal that's already conservative by
+construction. Conversely, a low partial score is genuinely uninformative: it
+is exactly what an unmeasured critical parameter would also look like from
+the outside, so it must not be read as reassurance. Treating "missing data"
+as evidence of health — the bug this section closes — would let a patient
+with zero measured vitals sort as the lowest priority in the queue, which is
+the opposite of what an unknown risk level should do.
+
 ---
 
 ## 3. Known gaps — not yet enforceable

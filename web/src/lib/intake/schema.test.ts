@@ -65,10 +65,13 @@ describe("parseIntakeForm - all vitals blank", () => {
     const assessment = assess(vitals, context);
 
     expect(assessment.missingParameters).toHaveLength(7);
-    // 0, because nothing was scored — not because a blank systolic BP (<=90
-    // => 3), temperature (<=35.0 => 3), or respiration rate (<=8 => 3) was
-    // silently coerced from "" into a real value and scored as abnormal.
-    expect(assessment.news2Score).toBe(0);
+    // null, because nothing was measured — not because a blank systolic BP
+    // (<=90 => 3), temperature (<=35.0 => 3), or respiration rate (<=8 => 3)
+    // was silently coerced from "" into a real value and scored as abnormal,
+    // and not 0 either, since 0 would misreport "nothing measured" as
+    // "measured and normal".
+    expect(assessment.news2Score).toBeNull();
+    expect(assessment.band).toBeNull();
     expect(assessment.requiresManualReview).toBe(true);
   });
 });

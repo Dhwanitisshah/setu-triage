@@ -333,10 +333,11 @@ describe("scoreNews2 - aggregate", () => {
 });
 
 describe("scoreNews2 - missing parameters", () => {
-  it("all seven parameters missing does not crash and reports all as missing", () => {
+  it("all seven parameters missing does not crash, reports all as missing, and scores null (not 0)", () => {
     const result = scoreNews2(allMissing, scale1Context);
-    expect(result.score).toBe(0);
+    expect(result.score).toBeNull();
     expect(result.missing).toHaveLength(7);
+    expect(result.allPresent).toBe(false);
     for (const p of result.parameterScores) {
       expect(p.missing).toBe(true);
     }
@@ -346,6 +347,19 @@ describe("scoreNews2 - missing parameters", () => {
     const result = scoreNews2(withVital({ pulse: null }), scale1Context);
     expect(result.missing).toEqual(["pulse"]);
     expect(result.score).toBe(0);
+    expect(result.allPresent).toBe(false);
+  });
+});
+
+describe("scoreNews2 - allPresent", () => {
+  it("true when all seven parameters are present", () => {
+    const result = scoreNews2(normalVitals, scale1Context);
+    expect(result.allPresent).toBe(true);
+  });
+
+  it("false when any parameter is missing", () => {
+    const result = scoreNews2(withVital({ temperature: null }), scale1Context);
+    expect(result.allPresent).toBe(false);
   });
 });
 

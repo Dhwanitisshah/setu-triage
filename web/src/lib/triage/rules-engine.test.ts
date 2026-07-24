@@ -179,6 +179,104 @@ describe("assess - spinal cord injury override", () => {
   });
 });
 
+describe("assess - partial scores are lower bounds, not conclusions", () => {
+  it("all seven missing => news2Score null, band null, no crash", () => {
+    const allMissing: VitalsInput = {
+      respiratoryRate: null,
+      spo2: null,
+      onSupplementalOxygen: null,
+      systolicBp: null,
+      pulse: null,
+      consciousness: null,
+      temperature: null,
+    };
+    expect(() => assess(allMissing, baseContext)).not.toThrow();
+    const result = assess(allMissing, baseContext);
+    expect(result.news2Score).toBeNull();
+    expect(result.band).toBeNull();
+    expect(result.requiresManualReview).toBe(true);
+  });
+
+  it("partial score 8 with two missing => band red (upward banding is sound)", () => {
+    // spo2 90 (3) + systolicBp 95 (2) + pulse 131 (3) = 8; respiratoryRate and
+    // temperature missing.
+    const result = assess(
+      withVital({
+        respiratoryRate: null,
+        spo2: 90,
+        systolicBp: 95,
+        pulse: 131,
+        temperature: null,
+      }),
+      baseContext,
+    );
+    expect(result.news2Score).toBe(8);
+    expect(result.missingParameters).toHaveLength(2);
+    expect(result.band).toBe("red");
+    expect(
+      result.rulesTriggered.some((r) => r.includes("stands despite missing parameter")),
+    ).toBe(true);
+  });
+
+  it("partial score 2 with four missing => band null, NOT green", () => {
+    // systolicBp 95 (2) only non-zero contribution; respiratoryRate, spo2,
+    // pulse, and temperature missing.
+    const result = assess(
+      withVital({
+        respiratoryRate: null,
+        spo2: null,
+        systolicBp: 95,
+        pulse: null,
+        temperature: null,
+      }),
+      baseContext,
+    );
+    expect(result.news2Score).toBe(2);
+    expect(result.missingParameters).toHaveLength(4);
+    expect(result.band).toBeNull();
+    expect(result.requiresManualReview).toBe(true);
+    expect(
+      result.rulesTriggered.some((r) => r.includes("would be green") && r.includes("cannot be ruled out")),
+    ).toBe(true);
+  });
+
+  it("partial score 5 with one missing => band yellow", () => {
+    // pulse 115 (2) + systolicBp 95 (2) + temperature 38.5 (1) = 5; spo2 missing.
+    const result = assess(
+      withVital({ spo2: null, pulse: 115, systolicBp: 95, temperature: 38.5 }),
+      baseContext,
+    );
+    expect(result.news2Score).toBe(5);
+    expect(result.missingParameters).toEqual(["spo2"]);
+    expect(result.band).toBe("yellow");
+  });
+
+  it("a single parameter scoring 3 with others missing => band yellow", () => {
+    const result = assess(
+      withVital({
+        pulse: 35,
+        respiratoryRate: null,
+        spo2: null,
+        onSupplementalOxygen: null,
+        systolicBp: null,
+        consciousness: null,
+        temperature: null,
+      }),
+      baseContext,
+    );
+    expect(result.news2Score).toBe(3);
+    expect(result.missingParameters).toHaveLength(6);
+    expect(result.band).toBe("yellow");
+  });
+
+  it("complete normal vitals still bands green (unchanged)", () => {
+    const result = assess(normalVitals, baseContext);
+    expect(result.news2Score).toBe(0);
+    expect(result.band).toBe("green");
+    expect(result.isPartialScore).toBe(false);
+  });
+});
+
 describe("assess - determinism", () => {
   it("returns identical output when called twice with identical input", () => {
     const first = assess(normalVitals, baseContext);
