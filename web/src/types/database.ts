@@ -56,6 +56,10 @@ export type VisitRow = {
   arrived_at: string;
   chief_complaint: string | null;
   status: VisitStatus;
+  /** null = not pregnant or unknown. docs/TRIAGE_BANDS.md §2.3/§3. */
+  pregnancy_weeks: number | null;
+  /** null = unknown, not "no". docs/TRIAGE_BANDS.md §3. */
+  has_spinal_cord_injury: boolean | null;
   created_at: string;
 };
 
