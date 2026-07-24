@@ -8,13 +8,18 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["src/lib/triage/**/*.test.ts", "src/lib/intake/**/*.test.ts"],
+    include: [
+      "src/lib/triage/**/*.test.ts",
+      "src/lib/intake/**/*.test.ts",
+      "src/lib/queue/**/*.test.ts",
+    ],
     coverage: {
       provider: "v8",
       include: [
         "src/lib/triage/news2.ts",
         "src/lib/triage/rules-engine.ts",
         "src/lib/intake/schema.ts",
+        "src/lib/queue/display.ts",
       ],
       reporter: ["text", "text-summary"],
     },

@@ -85,6 +85,7 @@ export type TriageResultRow = {
   band: TriageBand | null;
   decided_by: DecidedBy;
   news2_score: number | null;
+  is_partial_score: boolean;
   rules_triggered: unknown[];
   model_score: number | null;
   model_version: string | null;
@@ -126,7 +127,10 @@ export type QueueRow = {
   arrived_at: string;
   band: TriageBand | null;
   news2_score: number | null;
+  is_partial_score: boolean | null;
   requires_manual_review: boolean | null;
+  /** True when a triage_results row exists (even with band = null, i.e. unbanded). */
+  triaged: boolean;
 };
 
 export type Database = {

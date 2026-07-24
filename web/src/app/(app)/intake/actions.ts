@@ -13,22 +13,7 @@ import {
 } from "@/lib/intake/schema";
 import { createSupabaseRscClient } from "@/lib/supabase/rsc";
 import { assess } from "@/lib/triage/rules-engine";
-import type { TriageAssessment } from "@/lib/triage/types";
-
-export type IntakeActionState =
-  | { status: "idle" }
-  | {
-      status: "error";
-      formError: string | null;
-      fieldErrors: Record<string, string[]>;
-    }
-  | {
-      status: "success";
-      visitId: string;
-      assessment: TriageAssessment;
-    };
-
-export const initialIntakeActionState: IntakeActionState = { status: "idle" };
+import type { IntakeActionState } from "./action-state";
 
 function errorState(formError: string, fieldErrors: Record<string, string[]> = {}): IntakeActionState {
   return { status: "error", formError, fieldErrors };
@@ -163,6 +148,7 @@ export async function submitIntake(
       band: assessment.band,
       decided_by: "rules",
       news2_score: assessment.news2Score,
+      is_partial_score: assessment.isPartialScore,
       rules_triggered: assessment.rulesTriggered,
       requires_manual_review: assessment.requiresManualReview,
       rationale,

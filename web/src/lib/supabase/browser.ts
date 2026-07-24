@@ -6,8 +6,11 @@ import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "@/types/database";
 import { requireEnv } from "./require-env";
 
-const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
-const supabasePublishableKey = requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL", process.env.NEXT_PUBLIC_SUPABASE_URL);
+const supabasePublishableKey = requireEnv(
+  "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+);
 
 export function createSupabaseBrowserClient() {
   return createBrowserClient<Database>(supabaseUrl, supabasePublishableKey);

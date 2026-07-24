@@ -1,11 +1,8 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import {
-  initialIntakeActionState,
-  submitIntake,
-  type IntakeActionState,
-} from "@/app/(app)/intake/actions";
+import { initialIntakeActionState, type IntakeActionState } from "@/app/(app)/intake/action-state";
+import { submitIntake } from "@/app/(app)/intake/actions";
 
 type ExistingPatient = {
   id: string;

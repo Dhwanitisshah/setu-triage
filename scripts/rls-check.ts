@@ -4,7 +4,13 @@
 // A query that merely "doesn't throw" is not proof of anything — every
 // assertion below checks row counts and, where a rejection is expected,
 // the specific Postgres error code, so a wrong-reason failure still fails.
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  createClient,
+  REALTIME_SUBSCRIBE_STATES,
+  type RealtimeChannel,
+  type RealtimePostgresChangesPayload,
+  type SupabaseClient,
+} from "@supabase/supabase-js";
 import type { Database } from "../web/src/types/database";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -312,6 +318,192 @@ async function runChecksAsOperator(
   }
 }
 
+// =========================================================================
+// Realtime isolation -- exercises the same postgres_changes subscription
+// the live queue page uses (web/src/components/queue-list.tsx), not just
+// the underlying SELECT policies. Supabase Realtime evaluates RLS
+// separately from a plain query, so passing the query-based checks above
+// does not prove the realtime channel is isolated too -- an event payload
+// carries the full row, so a leaked event is a data leak even if v_queue
+// itself (and therefore the UI) never renders that row.
+// =========================================================================
+
+const REALTIME_WATCH_MS = 4000;
+const REALTIME_SUBSCRIBE_TIMEOUT_MS = 10000;
+const WATCHED_TABLES = ["visits", "triage_results", "vitals"] as const;
+type WatchedTable = (typeof WATCHED_TABLES)[number];
+
+interface RealtimeEvent {
+  table: WatchedTable;
+  eventType: string;
+  visitId: string | null;
+}
+
+// visits rows are keyed by `id`; triage_results/vitals rows carry their own
+// `id` but reference the visit via `visit_id` -- normalize to visitId so a
+// leaked event from any of the three tables can be tied back to the probe
+// visit that caused it.
+function extractVisitId(table: WatchedTable, row: Record<string, unknown>): string | null {
+  if (table === "visits") return typeof row.id === "string" ? row.id : null;
+  return typeof row.visit_id === "string" ? row.visit_id : null;
+}
+
+function subscribeToQueueTables(
+  client: SupabaseClient<Database>,
+  channelName: string,
+  events: RealtimeEvent[],
+): RealtimeChannel {
+  const channel = client.channel(channelName);
+  for (const table of WATCHED_TABLES) {
+    channel.on(
+      "postgres_changes",
+      { event: "*", schema: "public", table },
+      (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+        const row: Record<string, unknown> =
+          Object.keys(payload.new).length > 0 ? payload.new : payload.old;
+        events.push({ table, eventType: payload.eventType, visitId: extractVisitId(table, row) });
+      },
+    );
+  }
+  return channel;
+}
+
+async function waitForSubscribed(channel: RealtimeChannel, label: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label}: timed out waiting for realtime SUBSCRIBED status`)),
+      REALTIME_SUBSCRIBE_TIMEOUT_MS,
+    );
+    channel.subscribe((status) => {
+      if (status === REALTIME_SUBSCRIBE_STATES.SUBSCRIBED) {
+        clearTimeout(timer);
+        resolve();
+      } else if (
+        status === REALTIME_SUBSCRIBE_STATES.CHANNEL_ERROR ||
+        status === REALTIME_SUBSCRIBE_STATES.TIMED_OUT ||
+        status === REALTIME_SUBSCRIBE_STATES.CLOSED
+      ) {
+        clearTimeout(timer);
+        reject(new Error(`${label}: subscribe failed with status ${status}`));
+      }
+    });
+  });
+}
+
+interface ProbeFixture {
+  patientId: string;
+  visitId: string;
+}
+
+async function insertProbeVisit(
+  admin: SupabaseClient<Database>,
+  clinicId: string,
+): Promise<ProbeFixture> {
+  const { data: patient, error: patientErr } = await admin
+    .from("patients")
+    .insert({
+      clinic_id: clinicId,
+      full_name: "Realtime Isolation Probe",
+      consent_given_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+  if (patientErr || !patient) {
+    throw new Error(`could not create probe patient: ${patientErr?.message ?? "no row returned"}`);
+  }
+
+  const { data: visit, error: visitErr } = await admin
+    .from("visits")
+    .insert({ clinic_id: clinicId, patient_id: patient.id })
+    .select("id")
+    .single();
+  if (visitErr || !visit) {
+    throw new Error(`could not create probe visit: ${visitErr?.message ?? "no row returned"}`);
+  }
+
+  const { error: triageErr } = await admin.from("triage_results").insert({
+    clinic_id: clinicId,
+    visit_id: visit.id,
+    band: "red",
+    decided_by: "manual",
+  });
+  if (triageErr) throw new Error(`could not create probe triage_result: ${triageErr.message}`);
+
+  const { error: vitalsErr } = await admin
+    .from("vitals")
+    .insert({ clinic_id: clinicId, visit_id: visit.id });
+  if (vitalsErr) throw new Error(`could not create probe vitals: ${vitalsErr.message}`);
+
+  return { patientId: patient.id, visitId: visit.id };
+}
+
+async function deleteProbeVisit(
+  admin: SupabaseClient<Database>,
+  fixture: ProbeFixture | undefined,
+): Promise<void> {
+  if (!fixture) return;
+  // triage_results and vitals cascade-delete with the visit
+  // (0001_init.sql: both reference visits(id) on delete cascade).
+  await admin.from("visits").delete().eq("id", fixture.visitId);
+  await admin.from("patients").delete().eq("id", fixture.patientId);
+}
+
+async function runRealtimeIsolationCheck(
+  operatorLabel: string,
+  client: SupabaseClient<Database>,
+  admin: SupabaseClient<Database>,
+  ownClinicId: string,
+  otherClinicId: string,
+  otherClinicLabel: string,
+): Promise<void> {
+  const tag = (label: string) => `[${operatorLabel}] ${label}`;
+  const events: RealtimeEvent[] = [];
+  const channel = subscribeToQueueTables(
+    client,
+    `rls-check-realtime-${operatorLabel}-${Date.now()}`,
+    events,
+  );
+
+  let ownFixture: ProbeFixture | undefined;
+  let otherFixture: ProbeFixture | undefined;
+
+  try {
+    await waitForSubscribed(channel, tag("realtime subscribe"));
+
+    // ---- positive control ----
+    // Without this, a "zero events" result below would be ambiguous: it
+    // could mean RLS is correctly isolating clinic B's rows, or it could
+    // mean the channel/publication is silently broken and delivers nothing
+    // to anyone. Prove events flow at all before trusting their absence.
+    ownFixture = await insertProbeVisit(admin, ownClinicId);
+    await new Promise((resolve) => setTimeout(resolve, REALTIME_WATCH_MS));
+    const ownEvents = events.filter((e) => e.visitId === ownFixture!.visitId);
+    assert(
+      ownEvents.length > 0,
+      tag("realtime control: receives events for own clinic's rows"),
+      "received zero events for a same-clinic insert -- the postgres_changes " +
+        "subscription or realtime publication is misconfigured, which would make " +
+        "the isolation assertion below pass for the wrong reason",
+    );
+
+    // ---- isolation assertion ----
+    events.length = 0;
+    otherFixture = await insertProbeVisit(admin, otherClinicId);
+    await new Promise((resolve) => setTimeout(resolve, REALTIME_WATCH_MS));
+    const leaked = events.filter((e) => e.visitId === otherFixture!.visitId);
+    assert(
+      leaked.length === 0,
+      tag(`realtime isolation: receives zero events for ${otherClinicLabel}'s rows`),
+      `received ${leaked.length} event(s) from: ${[...new Set(leaked.map((e) => e.table))].join(", ")} ` +
+        "-- an event payload carries the row itself, so this is a leak even if the UI never renders it",
+    );
+  } finally {
+    await client.removeChannel(channel);
+    await deleteProbeVisit(admin, otherFixture);
+    await deleteProbeVisit(admin, ownFixture);
+  }
+}
+
 async function main(): Promise<void> {
   const admin = createClient<Database>(supabaseUrl!, serviceRoleKey!, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -325,6 +517,14 @@ async function main(): Promise<void> {
     fixtures.clinicAId,
     fixtures.clinicBId,
     fixtures.clinicBVisitId,
+  );
+  await runRealtimeIsolationCheck(
+    "operator-a",
+    clientA,
+    admin,
+    fixtures.clinicAId,
+    fixtures.clinicBId,
+    CLINIC_B_NAME,
   );
   await clientA.auth.signOut();
 
@@ -347,6 +547,14 @@ async function main(): Promise<void> {
     fixtures.clinicBId,
     fixtures.clinicAId,
     visitA.id,
+  );
+  await runRealtimeIsolationCheck(
+    "operator-b",
+    clientB,
+    admin,
+    fixtures.clinicBId,
+    fixtures.clinicAId,
+    CLINIC_A_NAME,
   );
   await clientB.auth.signOut();
 
